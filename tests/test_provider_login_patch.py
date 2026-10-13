@@ -123,7 +123,7 @@ class ProviderLoginPatchTests(unittest.TestCase):
         workflow = (BUILDER / '.github/workflows/build-ipa.yml').read_text()
         self.assertIn('default: 7e271c262c6c5495be5d1b680748ac4ba9e5bf0e', workflow)
         self.assertLess(workflow.index('python3 scripts/patch-provider-login.py upstream'),
-                        workflow.index('run: bash scripts/build-ipa.sh'))
+                        workflow.index('bash scripts/build-ipa.sh'))
         self.assertNotIn('push:', workflow)
 
 if __name__ == '__main__':

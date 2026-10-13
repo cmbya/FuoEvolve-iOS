@@ -52,8 +52,39 @@ jobs:
           rm "$ICON/source.png"
           sips -g pixelWidth -g pixelHeight -g hasAlpha "$ICON/AppIcon.png"
           plutil -lint upstream/iosApp/FuoEvolve.xcodeproj/project.pbxproj
+      - name: Identify exact build cache
+        id: build-cache
+        shell: bash
+        env:
+          PATCH_HASH: ${{ hashFiles('scripts/**', 'patches/**', '.github/workflows/build-ipa.yml') }}
+        run: |
+          SHA=$(git -C upstream rev-parse HEAD)
+          TOOL_HASH=$( { xcodebuild -version; java -version 2>&1; } | shasum -a 256 | cut -d ' ' -f 1)
+          echo "key=ios-release-v1-${{ runner.os }}-${{ runner.arch }}-${SHA}-${TOOL_HASH}-${PATCH_HASH}" >> "$GITHUB_OUTPUT"
+      - name: Restore exact-source build outputs
+        id: outputs-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            upstream/**/build
+            upstream/.gradle
+            !upstream/.gradle/configuration-cache
+          key: ${{ steps.build-cache.outputs.key }}
       - name: Build and package device application
-        run: bash scripts/build-ipa.sh
+        run: |
+          START=$(date +%s)
+          bash scripts/build-ipa.sh
+          ELAPSED=$(( $(date +%s) - START ))
+          printf 'build_and_package_seconds=%s\nexact_cache_hit=%s\n' "$ELAPSED" '${{ steps.outputs-cache.outputs.cache-hit }}' | tee output/timing.txt
+      - name: Save verified build outputs
+        if: success() && steps.outputs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            upstream/**/build
+            upstream/.gradle
+            !upstream/.gradle/configuration-cache
+          key: ${{ steps.build-cache.outputs.key }}
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
