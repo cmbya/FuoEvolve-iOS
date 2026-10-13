@@ -46,6 +46,8 @@ APP="$ROOT/build/Build/Products/Release-iphoneos/FuoEvolve.app"
 test -d "$APP"
 EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
 test -s "$APP/$EXEC"
+/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist" | grep -Fx AppIcon
+test -s "$APP/Assets.car"
 xcrun lipo "$APP/$EXEC" -verify_arch arm64
 xcrun vtool -show-build "$APP/$EXEC" | tee "$ROOT/logs/macho-platform.txt"
 grep -Eq 'platform[[:space:]]+IOS$' "$ROOT/logs/macho-platform.txt"

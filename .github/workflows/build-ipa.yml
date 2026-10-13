@@ -41,6 +41,15 @@ jobs:
           printf '%s\n' 'org.gradle.jvmargs=-Xmx8g -Dfile.encoding=UTF-8' 'org.gradle.workers.max=2' > ~/.gradle/gradle.properties
           sysctl hw.memsize
           cat ~/.gradle/gradle.properties
+      - name: Prepare official iOS icon
+        run: |
+          python3 scripts/prepare-icon.py upstream
+          ICON=upstream/iosApp/FuoEvolve/Assets.xcassets/AppIcon.appiconset
+          sips -s format bmp "$ICON/source.png" --out "$RUNNER_TEMP/icon.bmp"
+          sips -s format png "$RUNNER_TEMP/icon.bmp" --out "$ICON/AppIcon.png"
+          rm "$ICON/source.png"
+          sips -g pixelWidth -g pixelHeight -g hasAlpha "$ICON/AppIcon.png"
+          plutil -lint upstream/iosApp/FuoEvolve.xcodeproj/project.pbxproj
       - name: Build and package device application
         run: bash scripts/build-ipa.sh
       - name: Upload IPA
