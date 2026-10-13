@@ -11,6 +11,32 @@ SHA="$(git rev-parse HEAD)"
   xcodebuild -version
   java -version 2>&1
 } | tee "$ROOT/logs/environment.txt"
+# Progress monitor is independent of compiler output; never kill an active build
+# merely because the compiler is silent. Thread dumps aid stall diagnosis.
+(
+  tick=0
+  while sleep 60; do
+    tick=$((tick + 1))
+    {
+      echo "=== BUILD HEARTBEAT minute=$tick $(date -u) ==="
+      ps -axo pid,ppid,%cpu,rss,etime,comm | python3 -c 'import sys; lines=sys.stdin.readlines(); print(lines[0].strip()); print("".join(l for l in lines[1:] if any(k in l.lower() for k in ["java", "konan", "clang", "swift", "xcodebuild"])))'
+      vm_stat
+      df -h "$ROOT"
+    } | tee -a "$ROOT/logs/resources.log"
+    if [ $((tick % 10)) -eq 0 ]; then
+      jps -l > "$ROOT/logs/java-processes.txt" 2>&1 || true
+      while read -r pid name; do
+        case "$name" in
+          *GradleDaemon*|*Kotlin*)
+            jcmd "$pid" Thread.print > "$ROOT/logs/threads-${tick}-${pid}.txt" 2>&1 || true
+            ;;
+        esac
+      done < "$ROOT/logs/java-processes.txt"
+    fi
+  done
+) &
+MONITOR_PID=$!
+trap 'kill "$MONITOR_PID" 2>/dev/null || true' EXIT
 xcodebuild -project iosApp/FuoEvolve.xcodeproj -scheme FuoEvolve \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath "$ROOT/build" ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
