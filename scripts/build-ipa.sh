@@ -53,7 +53,7 @@ xcrun vtool -show-build "$APP/$EXEC" | tee "$ROOT/logs/macho-platform.txt"
 grep -Eq 'platform[[:space:]]+IOS$' "$ROOT/logs/macho-platform.txt"
 mkdir -p "$ROOT/package/Payload"
 ditto "$APP" "$ROOT/package/Payload/FuoEvolve.app"
-IPA="$ROOT/output/FuoEvolve-${SHA:0:12}-unsigned.ipa"
+IPA="$ROOT/output/FuoEvolve-${UPSTREAM_VERSION:?}-iOS-unsigned.ipa"
 (cd "$ROOT/package" && zip -qry -y "$IPA" Payload)
 unzip -t "$IPA" > "$ROOT/logs/zip-check.txt"
 cp "$ROOT/logs/environment.txt" "$ROOT/output/build-info.txt"
