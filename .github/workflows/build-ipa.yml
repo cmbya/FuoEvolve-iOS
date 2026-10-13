@@ -1,0 +1,51 @@
+name: Build unsigned FuoEvolve IPA
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream tag, branch or commit
+        default: master
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch upstream source
+        uses: actions/checkout@v5
+        with:
+          repository: feeluown/FuoEvolve
+          ref: ${{ inputs.upstream_ref }}
+          path: upstream
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
+      - uses: actions/cache@v6
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('upstream/gradle/libs.versions.toml') }}
+      - name: Build and package device application
+        run: bash scripts/build-ipa.sh
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FuoEvolve-iOS-unsigned
+          path: output/*
+          if-no-files-found: error
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: logs/*
+          if-no-files-found: ignore
