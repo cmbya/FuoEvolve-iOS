@@ -34,10 +34,10 @@ def insert(marker, text):
     s = s.replace(marker, text + '\n' + marker)
 insert('/* End PBXBuildFile section */', '        B10000000000000000000001 = {isa = PBXBuildFile; fileRef = B10000000000000000000002; };')
 insert('/* End PBXFileReference section */', '        B10000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };')
-marker = '                A10000000000000000011 /* FuoEvolveApp.swift */,'
-assert s.count(marker) == 1
-s = s.replace(marker, '                B10000000000000000000002 /* Assets.xcassets */,\n' + marker)
-marker = '                A10000000000000000020 /* Frameworks */,'
+marker = '                A10000000000000000000011 /* FuoEvolveApp.swift */,'
+assert s.count('\n' + marker) == 1
+s = s.replace('\n' + marker, '\n                B10000000000000000000002 /* Assets.xcassets */,\n' + marker)
+marker = '                A10000000000000000000020 /* Frameworks */,'
 assert s.count(marker) == 1
 s = s.replace(marker, marker + '\n                B10000000000000000000003 /* Resources */,')
 insert('/* Begin PBXGroup section */', '/* Begin PBXResourcesBuildPhase section */\n        B10000000000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B10000000000000000000001,); runOnlyForDeploymentPostprocessing = 0; };\n/* End PBXResourcesBuildPhase section */')
