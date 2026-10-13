@@ -4,7 +4,7 @@ on:
     inputs:
       upstream_ref:
         description: Upstream tag, branch or commit
-        default: master
+        default: 7e271c262c6c5495be5d1b680748ac4ba9e5bf0e
         required: true
         type: string
 permissions:
@@ -24,6 +24,8 @@ jobs:
           path: upstream
           fetch-depth: 0
           persist-credentials: false
+      - name: Apply guarded iOS provider login fixes
+        run: python3 scripts/patch-provider-login.py upstream
       - uses: actions/setup-java@v5
         with:
           distribution: temurin

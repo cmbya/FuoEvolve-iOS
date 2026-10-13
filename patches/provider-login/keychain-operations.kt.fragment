@@ -1,0 +1,58 @@
+@OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
+internal class IosProviderCredentialStore : ProviderCredentialStore {
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+
+    override suspend fun read(providerId: String): ProviderCredentials? = withQuery(providerId, includeData = true) { query ->
+        memScoped {
+            val result = alloc<CFTypeRefVar>()
+            result.value = null
+            val status = SecItemCopyMatching(query, result.ptr)
+            if (status != 0) {
+                result.value?.let { CFRelease(it) }
+                if (status == errSecItemNotFound) return@memScoped null
+                error("Keychain read failed: $status")
+            }
+            // Copy returns a +1 CF object. Transfer ownership to ARC before reading NSData.
+            val data = CFBridgingRelease(result.value) as? NSData ?: return@memScoped null
+            val bytes = data.bytes?.readBytes(data.length.toInt()) ?: return@memScoped null
+            runCatching { json.decodeFromString<ProviderCredentials>(bytes.decodeToString()) }.getOrNull()
+        }
+    }
+
+    override suspend fun write(providerId: String, credentials: ProviderCredentials) {
+        val bytes = json.encodeToString(credentials).encodeToByteArray()
+        memScoped {
+            val data = NSData.Companion.create(
+                bytes = bytes.refTo(0).getPointer(this),
+                length = bytes.size.toULong(),
+            )
+            withQuery(providerId, includeData = false) { query ->
+                val dataRef = checkNotNull(CFBridgingRetain(data))
+                try {
+                    val attributes = checkNotNull(CFDictionaryCreateMutable(null, 0, null, null))
+                    try {
+                        CFDictionaryAddValue(attributes, kSecValueData, dataRef)
+                        // Do not delete a valid credential before a replacement succeeds.
+                        val updateStatus = SecItemUpdate(query, attributes)
+                        val status = if (updateStatus == errSecItemNotFound) {
+                            CFDictionaryAddValue(query, kSecValueData, dataRef)
+                            SecItemAdd(query, null)
+                        } else updateStatus
+                        check(status == 0) { "Keychain write failed: $status" }
+                    } finally {
+                        CFRelease(attributes)
+                    }
+                } finally {
+                    CFRelease(dataRef)
+                }
+            }
+        }
+    }
+
+    override suspend fun delete(providerId: String) {
+        withQuery(providerId, includeData = false) { query ->
+            val status = SecItemDelete(query)
+            check(status == 0 || status == errSecItemNotFound) { "Keychain delete failed: $status" }
+        }
+    }
+

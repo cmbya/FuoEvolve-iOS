@@ -1,0 +1,25 @@
+    private fun <T> withQuery(
+        providerId: String,
+        includeData: Boolean,
+        block: (CFMutableDictionaryRef) -> T,
+    ): T {
+        // Null callbacks do not retain/release entries. Constants have static lifetime;
+        // explicitly retained Foundation strings stay alive until after the dictionary.
+        val query = checkNotNull(CFDictionaryCreateMutable(null, 0, null, null))
+        val retained = mutableListOf<CFTypeRef>()
+        try {
+            fun retain(value: Any): CFTypeRef = checkNotNull(CFBridgingRetain(value)).also { retained.add(it) }
+            CFDictionaryAddValue(query, kSecClass, kSecClassGenericPassword)
+            CFDictionaryAddValue(query, kSecAttrService, retain(SERVICE))
+            CFDictionaryAddValue(query, kSecAttrAccount, retain(providerId))
+            if (includeData) {
+                CFDictionaryAddValue(query, kSecMatchLimit, kSecMatchLimitOne)
+                CFDictionaryAddValue(query, kSecReturnData, kCFBooleanTrue)
+            }
+            return block(query)
+        } finally {
+            CFRelease(query)
+            retained.forEach { CFRelease(it) }
+        }
+    }
+

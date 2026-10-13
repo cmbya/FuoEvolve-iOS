@@ -1,0 +1,169 @@
+private final class FuoWebLoginViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver, UIAdaptivePresentationControllerDelegate {
+    private let webView = WKWebView(frame: .zero)
+    private let providerId: String
+    private let requiredCookieGroups: [[String]]
+    private let completion: (String?) -> Void
+    private var didComplete = false
+    private var hasAppeared = false
+
+    init(
+        providerId: String,
+        providerName: String,
+        url: URL,
+        requiredCookieGroups: [[String]],
+        completion: @escaping (String?) -> Void
+    ) {
+        self.providerId = providerId
+        self.requiredCookieGroups = requiredCookieGroups
+        self.completion = completion
+        super.init(nibName: nil, bundle: nil)
+        title = providerName
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        webView.configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // Preserve Bilibili's phone/SMS mobile page; expose desktop login controls for QQ/NetEase.
+        if ["qqmusic", "netease", "bilibili"].contains(providerId) {
+            webView.configuration.defaultWebpagePreferences.preferredContentMode =
+                providerId == "bilibili" ? .mobile : .desktop
+        }
+        if providerId == "qqmusic" || providerId == "netease" {
+            webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        }
+        webView.configuration.websiteDataStore.httpCookieStore.add(self)
+        webView.load(URLRequest(url: url))
+    }
+
+    deinit {
+        webView.configuration.websiteDataStore.httpCookieStore.remove(self)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() { view = webView }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .cancel, target: self, action: #selector(cancel)
+        )
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .done, target: self, action: #selector(done)
+        )
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        hasAppeared = true
+        navigationController?.presentationController?.delegate = self
+        collectCookies(manual: false)
+    }
+
+    private var cookieDomainRoots: [String] {
+        switch providerId {
+        case "netease": return ["163.com"]
+        case "qqmusic": return ["qq.com"]
+        case "bilibili": return ["bilibili.com"]
+        case "ytmusic": return ["youtube.com", "google.com"]
+        default: return [] // Unknown providers fail closed; never trust a redirected host.
+        }
+    }
+
+    private func cookieDomainAllowed(_ rawDomain: String) -> Bool {
+        let domain = rawDomain.lowercased().hasPrefix(".")
+            ? String(rawDomain.lowercased().dropFirst()) : rawDomain.lowercased()
+        return cookieDomainRoots.contains { root in
+            domain == root || domain.hasSuffix("." + root)
+        }
+    }
+
+    @objc private func cancel() { finish(nil) }
+    @objc private func done() { collectCookies(manual: true) }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        guard !didComplete else { return }
+        didComplete = true
+        webView.configuration.websiteDataStore.httpCookieStore.remove(self)
+        completion(nil)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        collectCookies(manual: false)
+    }
+
+    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+        DispatchQueue.main.async { [weak self] in self?.collectCookies(manual: false) }
+    }
+
+    func webView(
+        _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        // Keep target=_blank/window.open logins in the same observed cookie store.
+        if navigationAction.targetFrame == nil,
+           let scheme = navigationAction.request.url?.scheme?.lowercased(),
+           scheme == "https" || scheme == "http" {
+            webView.load(navigationAction.request)
+        }
+        return nil
+    }
+
+    private func collectCookies(manual: Bool) {
+        guard !didComplete, hasAppeared else { return }
+        webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard !self.didComplete else { return }
+                // An auto callback must not dismiss a manual feedback alert.
+                guard self.presentedViewController == nil else { return }
+                var values: [String: String] = [:]
+                let now = Date()
+                // Prefer domain-wide/root-path values when names are duplicated.
+                let scoped = cookies.filter { cookie in
+                    self.cookieDomainAllowed(cookie.domain) && !cookie.value.isEmpty &&
+                        (cookie.expiresDate.map { $0 > now } ?? true)
+                }.sorted {
+                    if $0.domain.count != $1.domain.count { return $0.domain.count < $1.domain.count }
+                    if $0.path.count != $1.path.count { return $0.path.count < $1.path.count }
+                    return ($0.domain + $0.path + $0.name) < ($1.domain + $1.path + $1.name)
+                }
+                for cookie in scoped where values[cookie.name] == nil {
+                    values[cookie.name] = cookie.value
+                }
+                let valid = !values.isEmpty && (self.requiredCookieGroups.isEmpty ||
+                    self.requiredCookieGroups.contains { group in
+                        !group.isEmpty && group.allSatisfy { !(values[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    })
+                // With no declared required keys, don't auto-complete on tracking cookies.
+                guard valid && (manual || !self.requiredCookieGroups.isEmpty) else {
+                    if manual { self.showCookieFeedback("尚未获取到完整登录凭据，请完成登录后再点完成。") }
+                    return
+                }
+                guard let data = try? JSONSerialization.data(withJSONObject: values),
+                      let json = String(data: data, encoding: .utf8) else {
+                    if manual { self.showCookieFeedback("无法读取登录凭据，请重试。") }
+                    return
+                }
+                self.finish(json)
+            }
+        }
+    }
+
+    private func showCookieFeedback(_ message: String) {
+        guard !didComplete, presentedViewController == nil else { return }
+        let alert = UIAlertController(title: "登录尚未完成", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "继续登录", style: .default))
+        present(alert, animated: true)
+    }
+
+    private func finish(_ result: String?) {
+        guard !didComplete else { return }
+        didComplete = true
+        webView.stopLoading()
+        webView.configuration.websiteDataStore.httpCookieStore.remove(self)
+        dismiss(animated: true) { self.completion(result) }
+    }
+}
+
