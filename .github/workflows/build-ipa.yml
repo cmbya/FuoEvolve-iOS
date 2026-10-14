@@ -69,16 +69,10 @@ jobs:
           rm "$ICON/source.png"
           sips -g pixelWidth -g pixelHeight -g hasAlpha "$ICON/AppIcon.png"
           plutil -lint upstream/iosApp/FuoEvolve.xcodeproj/project.pbxproj
-      - name: Identify exact build cache
+      - name: Identify compatible module cache
         id: build-cache
-        shell: bash
-        env:
-          PATCH_HASH: ${{ hashFiles('scripts/**', 'patches/**', '.github/workflows/build-ipa.yml') }}
-        run: |
-          SHA=$(git -C upstream rev-parse HEAD)
-          TOOL_HASH=$( { xcodebuild -version; java -version 2>&1; } | shasum -a 256 | cut -d ' ' -f 1)
-          echo "key=ios-release-v1-${{ runner.os }}-${{ runner.arch }}-${SHA}-${TOOL_HASH}-${PATCH_HASH}" >> "$GITHUB_OUTPUT"
-      - name: Restore exact-source build outputs
+        run: python3 scripts/cache-identity.py
+      - name: Restore compatible module outputs
         id: outputs-cache
         uses: actions/cache/restore@v6
         with:
@@ -87,6 +81,11 @@ jobs:
             upstream/.gradle
             !upstream/.gradle/configuration-cache
           key: ${{ steps.build-cache.outputs.key }}
+          restore-keys: ${{ steps.build-cache.outputs.prefix }}
+      - name: Record module cache match
+        run: |
+          mkdir -p logs
+          printf 'exact=%s\nrestored_key=%s\n' '${{ steps.outputs-cache.outputs.cache-hit }}' '${{ steps.outputs-cache.outputs.cache-matched-key }}' | tee logs/module-cache.txt
       - name: Build and package device application
         run: |
           START=$(date +%s)
