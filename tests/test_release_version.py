@@ -6,7 +6,8 @@ import unittest
 
 
 def resolver(workflow):
-    return workflow.split('      - name: Resolve upstream version\n', 1)[1].split('      - name: ', 1)[0]
+    label = '确认上游版本' if '      - name: 确认上游版本\n' in workflow else 'Resolve upstream version'
+    return workflow.split(f'      - name: {label}\n', 1)[1].split('      - name: ', 1)[0]
 
 
 class ReleaseVersionTests(unittest.TestCase):

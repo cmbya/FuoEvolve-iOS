@@ -1,4 +1,4 @@
-name: Build unsigned FuoEvolve IPA
+name: 构建并发布 iOS 未签名 IPA
 on:
   schedule:
     # UTC 06:00 = Asia/Shanghai 14:00.
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: Latest official release or an exact upstream release tag
+        description: 填写 latest 获取最新正式版，或填写上游正式发布标签，例如 1.6.3
         default: latest
         required: true
         type: string
@@ -17,13 +17,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check:
+    name: 检查上游版本
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.select.outputs.tag }}
       version: ${{ steps.select.outputs.version }}
       build: ${{ steps.select.outputs.build }}
     steps:
-      - name: Check official upstream release and existing IPA
+      - name: 检查上游正式版本及已有安装包
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
@@ -48,6 +49,7 @@ jobs:
           echo "build=$BUILD" >> "$GITHUB_OUTPUT"
           echo "Upstream=$TAG; build required=$BUILD" >> "$GITHUB_STEP_SUMMARY"
   build:
+    name: 构建并发布安装包
     needs: check
     if: needs.check.outputs.build == 'true'
     # Standard Intel runner has 14 GB RAM; target remains iPhone ARM64.
@@ -55,7 +57,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
-      - name: Fetch upstream source
+      - name: 获取上游源码
         uses: actions/checkout@v5
         with:
           repository: feeluown/FuoEvolve
@@ -63,7 +65,7 @@ jobs:
           path: upstream
           fetch-depth: 0
           persist-credentials: false
-      - name: Resolve upstream version
+      - name: 确认上游版本
         id: version
         working-directory: upstream
         env:
@@ -86,7 +88,7 @@ jobs:
           d['CFBundleShortVersionString']=os.environ['RESOLVED_VERSION']
           p.write_bytes(plistlib.dumps(d))
           PY
-      - name: Apply guarded iOS provider login fixes
+      - name: 应用 iOS 登录修复补丁
         run: python3 scripts/patch-provider-login.py upstream
       - uses: actions/setup-java@v5
         with:
@@ -99,13 +101,13 @@ jobs:
         with:
           path: ~/.konan
           key: ${{ runner.os }}-${{ runner.arch }}-konan-${{ hashFiles('upstream/gradle/libs.versions.toml') }}
-      - name: Configure Kotlin link memory
+      - name: 配置 Kotlin 构建内存
         run: |
           mkdir -p ~/.gradle
           printf '%s\n' 'org.gradle.jvmargs=-Xmx8g -Dfile.encoding=UTF-8' 'org.gradle.workers.max=2' > ~/.gradle/gradle.properties
           sysctl hw.memsize
           cat ~/.gradle/gradle.properties
-      - name: Prepare official iOS icon
+      - name: 准备官方 iOS 图标
         run: |
           python3 scripts/prepare-icon.py upstream
           ICON=upstream/iosApp/FuoEvolve/Assets.xcassets/AppIcon.appiconset
@@ -114,10 +116,10 @@ jobs:
           rm "$ICON/source.png"
           sips -g pixelWidth -g pixelHeight -g hasAlpha "$ICON/AppIcon.png"
           plutil -lint upstream/iosApp/FuoEvolve.xcodeproj/project.pbxproj
-      - name: Identify compatible module cache
+      - name: 计算兼容构建缓存标识
         id: build-cache
         run: python3 scripts/cache-identity.py
-      - name: Restore compatible module outputs
+      - name: 恢复兼容构建缓存
         id: outputs-cache
         uses: actions/cache/restore@v6
         with:
@@ -127,17 +129,17 @@ jobs:
             !upstream/.gradle/configuration-cache
           key: ${{ steps.build-cache.outputs.key }}
           restore-keys: ${{ steps.build-cache.outputs.prefix }}
-      - name: Record module cache match
+      - name: 记录缓存匹配结果
         run: |
           mkdir -p logs
           printf 'exact=%s\nrestored_key=%s\n' '${{ steps.outputs-cache.outputs.cache-hit }}' '${{ steps.outputs-cache.outputs.cache-matched-key }}' | tee logs/module-cache.txt
-      - name: Build and package device application
+      - name: 构建并打包 iPhone 应用
         run: |
           START=$(date +%s)
           bash scripts/build-ipa.sh
           ELAPSED=$(( $(date +%s) - START ))
           printf 'build_and_package_seconds=%s\nexact_cache_hit=%s\n' "$ELAPSED" '${{ steps.outputs-cache.outputs.cache-hit }}' | tee output/timing.txt
-      - name: Save verified build outputs
+      - name: 保存构建缓存
         if: success() && steps.outputs-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
@@ -146,13 +148,13 @@ jobs:
             upstream/.gradle
             !upstream/.gradle/configuration-cache
           key: ${{ steps.build-cache.outputs.key }}
-      - name: Upload IPA
+      - name: 上传 IPA 构建产物
         uses: actions/upload-artifact@v4
         with:
           name: FuoEvolve-iOS-unsigned
           path: output/*
           if-no-files-found: error
-      - name: Publish verified unsigned IPA
+      - name: 发布未签名 IPA
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -166,7 +168,7 @@ jobs:
           fi
           gh release create "$TAG" output/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "FuoEvolve $VERSION iOS" --notes-file release-notes.md --prerelease --latest=false
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,assets
-      - name: Upload build logs
+      - name: 上传构建日志
         if: always()
         uses: actions/upload-artifact@v4
         with:
